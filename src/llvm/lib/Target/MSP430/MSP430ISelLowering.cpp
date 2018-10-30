@@ -494,12 +494,6 @@ static void AnalyzeArguments(CCState &State,
           LocInfo = CCValAssign::AExt;
     }
 
-    // Handle byval arguments
-    if (ArgFlags.isByVal()) {
-      State.HandleByVal(ValNo++, ArgVT, LocVT, LocInfo, 2, 2, ArgFlags);
-      continue;
-    }
-
     unsigned Parts = ArgsParts[i];
 
     if (Builtin) {
@@ -608,6 +602,7 @@ SDValue MSP430TargetLowering::LowerCCCArguments(
 
   // Assign locations to all of the incoming arguments.
   SmallVector<CCValAssign, 16> ArgLocs;
+  SmallVector<SDValue, 4> MemOps;
   CCState CCInfo(CallConv, isVarArg, DAG.getMachineFunction(), ArgLocs,
                  *DAG.getContext());
   AnalyzeArguments(CCInfo, ArgLocs, Ins);
@@ -620,6 +615,8 @@ SDValue MSP430TargetLowering::LowerCCCArguments(
 
   for (unsigned i = 0, e = ArgLocs.size(); i != e; ++i) {
     CCValAssign &VA = ArgLocs[i];
+    SDValue ArgValue;
+
     if (VA.isRegLoc()) {
       // Arguments passed in registers
       EVT RegVT = VA.getLocVT();
@@ -635,7 +632,7 @@ SDValue MSP430TargetLowering::LowerCCCArguments(
       case MVT::i16:
         unsigned VReg = RegInfo.createVirtualRegister(&MSP430::GR16RegClass);
         RegInfo.addLiveIn(VA.getLocReg(), VReg);
-        SDValue ArgValue = DAG.getCopyFromReg(Chain, dl, VReg, RegVT);
+        ArgValue = DAG.getCopyFromReg(Chain, dl, VReg, RegVT);
 
         // If this is an 8-bit value, it is really passed promoted to 16
         // bits. Insert an assert[sz]ext to capture this, then truncate to the
@@ -649,41 +646,50 @@ SDValue MSP430TargetLowering::LowerCCCArguments(
 
         if (VA.getLocInfo() != CCValAssign::Full)
           ArgValue = DAG.getNode(ISD::TRUNCATE, dl, VA.getValVT(), ArgValue);
-
-        InVals.push_back(ArgValue);
       }
     } else {
       // Sanity check
       assert(VA.isMemLoc());
 
-      SDValue InVal;
-      ISD::ArgFlagsTy Flags = Ins[i].Flags;
-
-      if (Flags.isByVal()) {
-        int FI = MFI.CreateFixedObject(Flags.getByValSize(),
-                                       VA.getLocMemOffset(), true);
-        InVal = DAG.getFrameIndex(FI, getPointerTy(DAG.getDataLayout()));
-      } else {
-        // Load the argument to a virtual register
-        unsigned ObjSize = VA.getLocVT().getSizeInBits()/8;
-        if (ObjSize > 2) {
-            errs() << "LowerFormalArguments Unhandled argument type: "
-                << EVT(VA.getLocVT()).getEVTString()
-                << "\n";
-        }
-        // Create the frame index object for this incoming parameter...
-        int FI = MFI.CreateFixedObject(ObjSize, VA.getLocMemOffset(), true);
-
-        // Create the SelectionDAG nodes corresponding to a load
-        //from this parameter
-        SDValue FIN = DAG.getFrameIndex(FI, MVT::i16);
-        InVal = DAG.getLoad(
-            VA.getLocVT(), dl, Chain, FIN,
-            MachinePointerInfo::getFixedStack(DAG.getMachineFunction(), FI));
+      // Load the argument to a virtual register
+      unsigned ObjSize = VA.getLocVT().getSizeInBits()/8;
+      if (ObjSize > 2) {
+          errs() << "LowerFormalArguments Unhandled argument type: "
+              << EVT(VA.getLocVT()).getEVTString()
+              << "\n";
       }
+      // Create the frame index object for this incoming parameter...
+      int FI = MFI.CreateFixedObject(ObjSize, VA.getLocMemOffset(), true);
 
-      InVals.push_back(InVal);
+      // Create the SelectionDAG nodes corresponding to a load
+      // from this parameter
+      SDValue FIN = DAG.getFrameIndex(FI, MVT::i16);
+      ArgValue = DAG.getLoad(
+          VA.getLocVT(), dl, Chain, FIN,
+          MachinePointerInfo::getFixedStack(DAG.getMachineFunction(), FI));
     }
+
+    // Aggregates passed 'byval' need to be copied by a callee.
+    ISD::ArgFlagsTy Flags = Ins[i].Flags;
+    if (Flags.isByVal()) {
+      unsigned Size = Flags.getByValSize();
+      unsigned Align = Flags.getByValAlign();
+      int FI = MFI.CreateStackObject(Size, Align, /*isSS*/false);
+      SDValue FIN = DAG.getFrameIndex(FI, MVT::i16);
+      InVals.push_back(FIN);
+      SDValue SizeNode = DAG.getConstant(Size, dl, MVT::i16);
+      MemOps.push_back(DAG.getMemcpy(
+          Chain, dl, FIN, ArgValue, SizeNode, Align,
+          /*isVolatile=*/false, /*AlwaysInline=*/true,
+          /*isTailCall=*/false, MachinePointerInfo(), MachinePointerInfo()));
+    } else {
+      InVals.push_back(ArgValue);
+    }
+  }
+
+  if (!MemOps.empty()) {
+    MemOps.push_back(Chain);
+    Chain = DAG.getNode(ISD::TokenFactor, dl, MVT::Other, MemOps);
   }
 
   for (unsigned i = 0, e = ArgLocs.size(); i != e; ++i) {
@@ -840,21 +846,8 @@ SDValue MSP430TargetLowering::LowerCCCCallTo(
           DAG.getNode(ISD::ADD, dl, PtrVT, StackPtr,
                       DAG.getIntPtrConstant(VA.getLocMemOffset(), dl));
 
-      SDValue MemOp;
-      ISD::ArgFlagsTy Flags = Outs[i].Flags;
-
-      if (Flags.isByVal()) {
-        SDValue SizeNode = DAG.getConstant(Flags.getByValSize(), dl, MVT::i16);
-        MemOp = DAG.getMemcpy(Chain, dl, PtrOff, Arg, SizeNode,
-                              Flags.getByValAlign(),
-                              /*isVolatile*/false,
-                              /*AlwaysInline=*/true,
-                              /*isTailCall=*/false,
-                              MachinePointerInfo(),
-                              MachinePointerInfo());
-      } else {
-        MemOp = DAG.getStore(Chain, dl, Arg, PtrOff, MachinePointerInfo());
-      }
+      SDValue MemOp =
+          DAG.getStore(Chain, dl, Arg, PtrOff, MachinePointerInfo());
 
       MemOpChains.push_back(MemOp);
     }
