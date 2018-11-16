@@ -226,7 +226,6 @@ let isCodeGenOnly = 1, usesCustomInserter = 1 in {
 //  Control Flow Instructions...
 //
 
-// FIXME: Provide proper encoding!
 let isReturn = 1, isTerminator = 1, isBarrier = 1 in {
   def RET  : IForm16<0b0100, DstReg, SrcPostInc, 2,
                      (outs), (ins), "ret",  [(MSP430retflag)]> {
@@ -317,7 +316,6 @@ def PUSH16i : II16i<0b100, (outs), (ins i16imm:$imm), "push\t$imm", []>;
 //===----------------------------------------------------------------------===//
 // Move Instructions
 
-// FIXME: Provide proper encoding!
 let hasSideEffects = 0 in {
 def MOV8rr  : I8rr<0b0100,
                    (outs GR8:$rd), (ins GR8:$rs),
@@ -329,7 +327,6 @@ def MOV16rr : I16rr<0b0100,
                     []>;
 }
 
-// FIXME: Provide proper encoding!
 let isReMaterializable = 1, isAsCheapAsAMove = 1 in {
 def MOV8rc : I8rc<0b0100,
                    (outs GR8:$rd), (ins cg8imm:$imm),
@@ -438,6 +435,10 @@ def MOV16mm : I16mm<0b0100,
                     (outs), (ins memdst:$dst, memsrc:$src),
                     "mov\t{$src, $dst}",
                     [(store (i16 (load addr:$src)), addr:$dst)]>;
+def MOV8mn  : I8mn<0b0100, (outs), (ins memdst:$dst, indreg:$src),
+                   "mov.b\t{$src, $dst}", []>;
+def MOV16mn : I16mn<0b0100, (outs), (ins memdst:$dst, indreg:$src),
+                    "mov\t{$src, $dst}", []>;
 
 //===----------------------------------------------------------------------===//
 // Arithmetic Instructions
