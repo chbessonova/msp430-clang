@@ -69,8 +69,8 @@ void MSP430InstPrinter::printSrcMemOperand(const MCInst *MI, unsigned OpNo,
                                            const char *Modifier) {
   const MCOperand &Base = MI->getOperand(OpNo);
   const MCOperand &Disp = MI->getOperand(OpNo+1);
-  assert(Disp.isImm() ||
-         Disp.isExpr() && "Unexpected type in displacement field");
+
+  // Print displacement first
 
   // If the global address expression is a part of displacement field with a
   // register base, we should not emit any prefix symbol here, e.g.
@@ -81,26 +81,17 @@ void MSP430InstPrinter::printSrcMemOperand(const MCInst *MI, unsigned OpNo,
   if (Base.getReg() == MSP430::SR)
     O << '&';
 
-  if (Base.getReg() == MSP430::SR || Base.getReg() == MSP430::PC) {
-    if (Disp.isExpr())
-      Disp.getExpr()->print(O, &MAI);
-    else
-      O << Disp.getImm();
-    return;
-  }
-
-  // Print 0(Rn) as @Rn
-  if (Disp.isImm() && Disp.getImm() == 0) {
-    O << '@' << getRegisterName(Base.getReg());
-    return;
-  }
-
   if (Disp.isExpr())
     Disp.getExpr()->print(O, &MAI);
-  else
+  else {
+    assert(Disp.isImm() && "Expected immediate in displacement field");
     O << Disp.getImm();
+  }
 
-  O << '(' << getRegisterName(Base.getReg()) << ')';
+  // Print register base field
+  if ((Base.getReg() != MSP430::SR) &&
+      (Base.getReg() != MSP430::PC))
+    O << '(' << getRegisterName(Base.getReg()) << ')';
 }
 
 void MSP430InstPrinter::printIndRegOperand(const MCInst *MI, unsigned OpNo,
