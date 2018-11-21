@@ -953,12 +953,15 @@ SDValue MSP430TargetLowering::LowerShifts(SDValue Op,
   // Expand the stuff into sequence of shifts.
   SDValue Victim = N->getOperand(0);
 
-  if ((Opc == ISD::SRA || Opc == ISD::SRL) && ShiftAmount > 8) {
-    // E.g.: foo >> (8 + N) => sxt(swpb(foo)) >> N
+  if ((Opc == ISD::SRA || Opc == ISD::SRL) && ShiftAmount >= 8) {
+    // foo >> (8 + N) => sxt(swpb(foo)) >> N
+    assert(VT == MVT::i16 && "Can not shift i8 by 8 and more");
     Victim = DAG.getNode(ISD::BSWAP, dl, VT, Victim);
-    unsigned ExtOpc =
-        Opc == ISD::SRA ? ISD::SIGN_EXTEND_INREG : ISD::ZERO_EXTEND;
-    Victim = DAG.getNode(ExtOpc, dl, VT, Victim, DAG.getValueType(MVT::i8));
+    if (Opc == ISD::SRA)
+      Victim = DAG.getNode(ISD::SIGN_EXTEND_INREG, dl, VT, Victim,
+                           DAG.getValueType(MVT::i8));
+    else
+      Victim = DAG.getZeroExtendInReg(Victim, dl, MVT::i8);
     ShiftAmount -= 8;
   }
 
