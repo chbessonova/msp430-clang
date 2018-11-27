@@ -64,13 +64,30 @@ void MSP430InstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
   }
 }
 
+void MSP430InstPrinter::printDstMemOperand(const MCInst *MI, unsigned OpNo,
+                                           raw_ostream &O,
+                                           const char *Modifier) {
+  const MCOperand &Base = MI->getOperand(OpNo);
+  const MCOperand &Disp = MI->getOperand(OpNo+1);
+
+  // Indirect register mode can't be a destination, but it can be "emulated"
+  // by printing for better readability (as GCC does).
+  if (Disp.isImm() && Disp.getImm() == 0 &&
+      Base.getReg() != MSP430::SR && Base.getReg() != MSP430::PC) {
+    O << '@' << getRegisterName(Base.getReg());
+    return;
+  }
+
+  printSrcMemOperand(MI, OpNo, O, Modifier);
+}
+
 void MSP430InstPrinter::printSrcMemOperand(const MCInst *MI, unsigned OpNo,
                                            raw_ostream &O,
                                            const char *Modifier) {
   const MCOperand &Base = MI->getOperand(OpNo);
   const MCOperand &Disp = MI->getOperand(OpNo+1);
-  assert(Disp.isImm() ||
-         Disp.isExpr() && "Unexpected type in displacement field");
+  assert((Disp.isImm() ||
+          Disp.isExpr()) && "Unexpected type in displacement field");
 
   // If the global address expression is a part of displacement field with a
   // register base, we should not emit any prefix symbol here, e.g.
@@ -81,24 +98,14 @@ void MSP430InstPrinter::printSrcMemOperand(const MCInst *MI, unsigned OpNo,
   if (Base.getReg() == MSP430::SR)
     O << '&';
 
-  if (Base.getReg() == MSP430::SR || Base.getReg() == MSP430::PC) {
-    if (Disp.isExpr())
-      Disp.getExpr()->print(O, &MAI);
-    else
-      O << Disp.getImm();
-    return;
-  }
-
-  // Print 0(Rn) as @Rn
-  if (Disp.isImm() && Disp.getImm() == 0) {
-    O << '@' << getRegisterName(Base.getReg());
-    return;
-  }
-
   if (Disp.isExpr())
     Disp.getExpr()->print(O, &MAI);
   else
     O << Disp.getImm();
+
+  if (Base.getReg() == MSP430::SR ||
+      Base.getReg() == MSP430::PC)
+    return;
 
   O << '(' << getRegisterName(Base.getReg()) << ')';
 }
