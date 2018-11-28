@@ -22,7 +22,7 @@ entry:
 define zeroext i8 @shl8(i8 zeroext %a, i8 zeroext %cnt) nounwind readnone {
 entry:
 ; CHECK: shl8
-; CHECK: add.b
+; CHECK: rla.b
   %shl = shl i8 %a, %cnt
   ret i8 %shl
 }
@@ -47,7 +47,7 @@ entry:
 define zeroext i16 @shl16(i16 zeroext %a, i16 zeroext %cnt) nounwind readnone {
 entry:
 ; CHECK-LABEL: shl16:
-; CHECK: add
+; CHECK: rla
   %shl = shl i16 %a, %cnt
   ret i16 %shl
 }
@@ -80,8 +80,8 @@ entry:
 ; CHECK-LABEL: lshl10_i16:
 ; CHECK:      mov.b r12, r12
 ; CHECK-NEXT: swpb r12
-; CHECK-NEXT: add r12, r12
-; CHECK-NEXT: add r12, r12
+; CHECK-NEXT: rla r12
+; CHECK-NEXT: rla r12
   %shl = shl i16 %a, 10
   ret i16 %shl
 }

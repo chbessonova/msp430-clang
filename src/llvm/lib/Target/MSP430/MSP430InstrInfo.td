@@ -590,16 +590,16 @@ def INV16r  : InstAlias<"inv\t$dst",    (XOR16rc   GR16:$dst,   -1)>;
 def INV8m   : InstAlias<"inv.b\t$dst",  (XOR8mc    memdst:$dst, -1)>;
 def INV16m  : InstAlias<"inv\t$dst",    (XOR16mc   memdst:$dst, -1)>;
 
-// printAliasInstr() doesn't check $dst operands are actually equal
+// printAliasInstr() doesn't check non-register operands are actually equal
 // for RLA and RLC aliases below, so disable printing aliases.
 
-def RLA8r   : InstAlias<"rla.b\t$dst",  (ADD8rr    GR8:$dst,     GR8:$dst),    0>;
-def RLA16r  : InstAlias<"rla\t$dst",    (ADD16rr   GR16:$dst,    GR16:$dst),   0>;
+def RLA8r   : InstAlias<"rla.b\t$dst",  (ADD8rr    GR8:$dst,     GR8:$dst),    1>;
+def RLA16r  : InstAlias<"rla\t$dst",    (ADD16rr   GR16:$dst,    GR16:$dst),   1>;
 def RLA8m   : InstAlias<"rla.b\t$dst",  (ADD8mm    memdst:$dst,  memdst:$dst), 0>;
 def RLA16m  : InstAlias<"rla\t$dst",    (ADD16mm   memdst:$dst,  memdst:$dst), 0>;
 
-def RLC8r   : InstAlias<"rlc.b\t$dst",  (ADDC8rr   GR8:$dst,     GR8:$dst),    0>;
-def RLC16r  : InstAlias<"rlc\t$dst",    (ADDC16rr  GR16:$dst,    GR16:$dst),   0>;
+def RLC8r   : InstAlias<"rlc.b\t$dst",  (ADDC8rr   GR8:$dst,     GR8:$dst),    1>;
+def RLC16r  : InstAlias<"rlc\t$dst",    (ADDC16rr  GR16:$dst,    GR16:$dst),   1>;
 def RLC8m   : InstAlias<"rlc.b\t$dst",  (ADDC8mm   memdst:$dst,  memdst:$dst), 0>;
 def RLC16m  : InstAlias<"rlc\t$dst",    (ADDC16mm  memdst:$dst,  memdst:$dst), 0>;
 

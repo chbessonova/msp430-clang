@@ -125,9 +125,9 @@
   ;; Emulated logical instructions
   inv    r7     ; CHECK-INST: inv    r7
                 ; CHECK: encoding: [0x37,0xe3]
-  rla    r7     ; CHECK-INST: add    r7, r7
+  rla    r7     ; CHECK-INST: rla    r7
                 ; CHECK: encoding: [0x07,0x57]
-  rlc    r7     ; CHECK-INST: addc   r7, r7
+  rlc    r7     ; CHECK-INST: rlc    r7
                 ; CHECK: encoding: [0x07,0x67]
 
   ;; Emulated program flow control instructions

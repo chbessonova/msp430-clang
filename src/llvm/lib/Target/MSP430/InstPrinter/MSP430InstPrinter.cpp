@@ -27,10 +27,47 @@ using namespace llvm;
 #define PRINT_ALIAS_INSTR
 #include "MSP430GenAsmWriter.inc"
 
+static bool isRLAmInstruction(const MCInst *MI) {
+  // add x,x == rla x
+  unsigned Opc = MI->getOpcode();
+  if (Opc != MSP430::ADD8mm && Opc != MSP430::ADD16mm &&
+      Opc != MSP430::ADDC8mm && Opc != MSP430::ADDC16mm)
+    return false;
+
+  // Check operands pairs are equal
+  const MCOperand &Op1 = MI->getOperand(0);
+  const MCOperand &Op2 = MI->getOperand(1);
+  const MCOperand &Op3 = MI->getOperand(2);
+  const MCOperand &Op4 = MI->getOperand(3);
+
+  if (Op1.isReg() && Op3.isReg() && Op1.getReg() == Op3.getReg() &&
+      Op2.isImm() && Op4.isImm() && Op2.getImm() == Op4.getImm())
+      return true;
+  // TODO: Is it possible to check if two MCExpr are equal?
+  return false;
+}
+
 void MSP430InstPrinter::printInst(const MCInst *MI, raw_ostream &O,
                                   StringRef Annot, const MCSubtargetInfo &STI) {
+  // Print add x,x -> rla x (only mm case here, rr is handled by tablegen)
+  // TODO: Is it possible to resolve this by tablegen as well?
+  if (isRLAmInstruction(MI)) {
+    switch (MI->getOpcode()) {
+    case MSP430::ADD8mm:     O << "\trla.b\t";        break;
+    case MSP430::ADD16mm:    O << "\trla\t";          break;
+    case MSP430::ADDC8mm:    O << "\trlc.b\t";        break;
+    case MSP430::ADDC16mm:   O << "\trlc\t";          break;
+    default:
+      llvm_unreachable("Unexpected instruction");
+    }
+    printSrcMemOperand(MI, 0, O);
+    printAnnotation(O, Annot);
+    return;
+  }
+
   if (!printAliasInstr(MI, O))
     printInstruction(MI, O);
+
   printAnnotation(O, Annot);
 }
 
