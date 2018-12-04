@@ -131,6 +131,10 @@ namespace llvm {
     MachineBasicBlock *EmitShiftInstr(MachineInstr &MI,
                                       MachineBasicBlock *BB) const;
 
+    void ReplaceNodeResults(SDNode *N, SmallVectorImpl<SDValue> &Results,
+                            SelectionDAG &DAG) const;
+    SDValue ExpandI32I64ShiftByConstant(SDNode *N, SelectionDAG &DAG) const;
+
   private:
     SDValue LowerCCCCallTo(SDValue Chain, SDValue Callee,
                            CallingConv::ID CallConv, bool isVarArg,

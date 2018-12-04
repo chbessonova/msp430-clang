@@ -146,6 +146,14 @@ MSP430TargetLowering::MSP430TargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::VACOPY,           MVT::Other, Expand);
   setOperationAction(ISD::JumpTable,        MVT::i16,   Custom);
 
+  // Custom expand i32/i64 shifts to library calls
+  setOperationAction(ISD::SHL,              MVT::i32,   Custom);
+  setOperationAction(ISD::SRA,              MVT::i32,   Custom);
+  setOperationAction(ISD::SRL,              MVT::i32,   Custom);
+  setOperationAction(ISD::SHL,              MVT::i64,   Custom);
+  setOperationAction(ISD::SRA,              MVT::i64,   Custom);
+  setOperationAction(ISD::SRL,              MVT::i64,   Custom);
+
   // EABI Libcalls - EABI Section 6.2
   const struct {
     const RTLIB::Libcall Op;
@@ -352,6 +360,125 @@ SDValue MSP430TargetLowering::LowerOperation(SDValue Op,
   default:
     llvm_unreachable("unimplemented operand");
   }
+}
+
+// Special int32 helper functions for shifts by 1..15
+// All the helper functions are implemented in libgcc
+static const char *
+getSpecialI32ShiftLibCallName(SDNode *N, unsigned ShiftAmount) {
+  assert((N->getValueType(0) == MVT::i32) &&
+         "Special helpers are defined only for int32");
+#define SHIFT_AMOUNT_SWITCH(Name) \
+  switch (ShiftAmount) {          \
+  case 1:  return #Name"_1";      \
+  case 2:  return #Name"_2";      \
+  case 3:  return #Name"_3";      \
+  case 4:  return #Name"_4";      \
+  case 5:  return #Name"_5";      \
+  case 6:  return #Name"_6";      \
+  case 7:  return #Name"_7";      \
+  case 8:  return #Name"_8";      \
+  case 9:  return #Name"_9";      \
+  case 10: return #Name"_10";     \
+  case 11: return #Name"_11";     \
+  case 12: return #Name"_12";     \
+  case 13: return #Name"_13";     \
+  case 14: return #Name"_14";     \
+  case 15: return #Name"_15";     \
+  default: return #Name;          \
+  }
+  switch (N->getOpcode()) {
+  case ISD::SHL:
+    SHIFT_AMOUNT_SWITCH(__mspabi_slll)
+  case ISD::SRA:
+    SHIFT_AMOUNT_SWITCH(__mspabi_sral)
+  case ISD::SRL:
+    SHIFT_AMOUNT_SWITCH(__mspabi_srll)
+  default:
+    llvm_unreachable("Shift instruction is expected");
+    return nullptr;
+  }
+#undef SHIFT_AMOUNT_SWITCH
+}
+
+static RTLIB::Libcall getGenericI64ShiftLibCall(SDNode *N) {
+  assert((N->getValueType(0) == MVT::i64) && "Int64 is expected");
+  switch (N->getOpcode()) {
+  case ISD::SHL: return RTLIB::SHL_I64;
+  case ISD::SRA: return RTLIB::SRA_I64;
+  case ISD::SRL: return RTLIB::SRL_I64;
+  default:
+    llvm_unreachable("Shift instruction is expected");
+    return RTLIB::UNKNOWN_LIBCALL;
+  }
+}
+
+// Lower a i32/i64 shift by a constant in range 1..15 to library call
+SDValue
+MSP430TargetLowering::ExpandI32I64ShiftByConstant(SDNode *N,
+                                                  SelectionDAG &DAG) const {
+  ConstantSDNode *CN = cast<ConstantSDNode>(N->getOperand(1));
+  unsigned ShiftAmount = CN->getAPIntValue().getZExtValue();
+
+  if (ShiftAmount > 15 || ShiftAmount == 8)
+    return SDValue();
+
+  EVT VT = N->getValueType(0);
+
+  // Emit special helper functions for int32 shifts
+  // See MSP430 EABI Table 10 - Bitwise Operations for details
+  bool isSpecialI32 = VT == MVT::i32;
+
+  SDValue Callee = DAG.getExternalSymbol(
+      isSpecialI32 ? getSpecialI32ShiftLibCallName(N, ShiftAmount)
+                   : getLibcallName(getGenericI64ShiftLibCall(N)),
+      getPointerTy(DAG.getDataLayout()));
+
+  // Prepare arguments
+  TargetLowering::ArgListTy Args;
+  TargetLowering::ArgListEntry Entry;
+
+  Entry.Node = N->getOperand(0);
+  Entry.Ty = N->getOperand(0).getValueType().getTypeForEVT(*DAG.getContext());
+  Args.push_back(Entry);
+
+  if (!isSpecialI32) {
+    Entry.Node = N->getOperand(1);
+    Entry.Ty = N->getOperand(1).getValueType().getTypeForEVT(*DAG.getContext());
+    Args.push_back(Entry);
+  }
+
+  SDLoc dl(N);
+  SDValue InChain = DAG.getEntryNode();
+  Type *RetTy = VT.getTypeForEVT(*DAG.getContext());
+
+  TargetLowering::CallLoweringInfo CLI(DAG);
+  CLI.setDebugLoc(dl).setChain(InChain)
+     .setCallee(CallingConv::C, RetTy, Callee, std::move(Args));
+  std::pair<SDValue, SDValue> CallInfo = LowerCallTo(CLI);
+
+  return CallInfo.first;
+}
+
+/// ReplaceNodeResults - Replace the results of node with an illegal result
+/// type with new values built out of custom code.
+void MSP430TargetLowering::ReplaceNodeResults(SDNode *N,
+                                              SmallVectorImpl<SDValue> &Results,
+                                              SelectionDAG &DAG) const {
+  SDValue Res;
+  switch (N->getOpcode()) {
+  default:
+    llvm_unreachable("Don't know how to custom expand this!");
+  case ISD::SHL:
+  case ISD::SRL:
+  case ISD::SRA:
+    if (isa<ConstantSDNode>(N->getOperand(1)))
+      Res = ExpandI32I64ShiftByConstant(N, DAG);
+    break;
+  }
+  if (Res.getNode())
+    Results.push_back(Res);
+  return;
 }
 
 //===----------------------------------------------------------------------===//
