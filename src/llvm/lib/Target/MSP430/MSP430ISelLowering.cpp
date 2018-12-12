@@ -473,7 +473,9 @@ static void AnalyzeArguments(CCState &State,
         "Builtin calling convention requires two arguments");
   }
 
-  unsigned RegsLeft = NbRegs;
+  // An argument of interrupt handler is on the stack
+  unsigned RegsLeft =
+      (State.getCallingConv() == CallingConv::MSP430_INTR) ? 0 : NbRegs;
   bool UsedStack = false;
   unsigned ValNo = 0;
 
@@ -558,9 +560,12 @@ SDValue MSP430TargetLowering::LowerFormalArguments(
   case CallingConv::Fast:
     return LowerCCCArguments(Chain, CallConv, isVarArg, Ins, dl, DAG, InVals);
   case CallingConv::MSP430_INTR:
-    if (Ins.empty())
-      return Chain;
-    report_fatal_error("ISRs cannot have arguments");
+    // MSP430 interrupt handler may take one argument (saved SR)
+    if (Ins.size() > 1)
+      report_fatal_error("MSP430 interrupts may take no or one argument");
+    return Ins.empty() ? Chain
+                       : LowerCCCArguments(Chain, CallConv, isVarArg, Ins, dl,
+                                           DAG, InVals);
   }
 }
 
@@ -662,6 +667,22 @@ SDValue MSP430TargetLowering::LowerCCCArguments(
       if (Flags.isByVal()) {
         int FI = MFI.CreateFixedObject(Flags.getByValSize(),
                                        VA.getLocMemOffset(), true);
+        if (CallConv == CallingConv::MSP430_INTR) {
+          // Iterrupts push a return address and a status register
+          // (an interrupt handler argument) on the stack,
+          // then branch to interrupt handler.
+          //
+          //    Before interrupt        After interrupt
+          //       |  ...  |               |  ...  |
+          // SP -> |  Item |               |  Item |
+          //                               |   PC  |
+          //                         SP -> |   SR  |
+          //
+          // To access to saved copy of SR, the argument offset needs
+          // to be set to -2 bytes.
+          MFI.setObjectOffset(FI, -2);
+        }
+
         InVal = DAG.getFrameIndex(FI, getPointerTy(DAG.getDataLayout()));
       } else {
         // Load the argument to a virtual register

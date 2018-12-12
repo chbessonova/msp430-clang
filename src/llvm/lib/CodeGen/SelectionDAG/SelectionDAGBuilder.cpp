@@ -9072,8 +9072,10 @@ void SelectionDAGISel::LowerArguments(const Function &F) {
         // in the various CC lowering callbacks.
         Flags.setByVal();
       }
-      if (F.getCallingConv() == CallingConv::X86_INTR) {
-        // IA Interrupt passes frame (1st parameter) by value in the stack.
+      if (F.getCallingConv() == CallingConv::X86_INTR ||
+          F.getCallingConv() == CallingConv::MSP430_INTR) {
+        // IA Interrupts pass frame (1st parameter) by value in the stack.
+        // MSP430 Interrupts pass status (1st parameter) by value in the stack.
         if (ArgNo == 0)
           Flags.setByVal();
       }
