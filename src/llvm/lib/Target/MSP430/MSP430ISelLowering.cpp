@@ -146,6 +146,9 @@ MSP430TargetLowering::MSP430TargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::VACOPY,           MVT::Other, Expand);
   setOperationAction(ISD::JumpTable,        MVT::i16,   Custom);
 
+  // Custom lowering for some intrinsics
+  setOperationAction(ISD::INTRINSIC_W_CHAIN, MVT::Other, Custom);
+
   // EABI Libcalls - EABI Section 6.2
   const struct {
     const RTLIB::Libcall Op;
@@ -349,6 +352,7 @@ SDValue MSP430TargetLowering::LowerOperation(SDValue Op,
   case ISD::FRAMEADDR:        return LowerFRAMEADDR(Op, DAG);
   case ISD::VASTART:          return LowerVASTART(Op, DAG);
   case ISD::JumpTable:        return LowerJumpTable(Op, DAG);
+  case ISD::INTRINSIC_W_CHAIN: return LowerINTRINSIC_W_CHAIN(Op, DAG);
   default:
     llvm_unreachable("unimplemented operand");
   }
@@ -936,6 +940,55 @@ SDValue MSP430TargetLowering::LowerCallResult(
   }
 
   return Chain;
+}
+
+SDValue MSP430TargetLowering::
+LowerINTRINSIC_W_CHAIN(SDValue Op, SelectionDAG &DAG) const {
+  unsigned IntNo = cast<ConstantSDNode>(Op.getOperand(1))->getZExtValue();
+  switch (IntNo) {
+  default:
+    break;
+  case Intrinsic::msp430_bis_saved_status:
+  case Intrinsic::msp430_bic_saved_status:
+    MachineFunction &MF = DAG.getMachineFunction();
+    MSP430MachineFunctionInfo *FuncInfo =
+        MF.getInfo<MSP430MachineFunctionInfo>();
+
+    int SavedSRFrameIndex = FuncInfo->getSavedSRIndex();
+    if (SavedSRFrameIndex == 0) {
+      SavedSRFrameIndex =
+          MF.getFrameInfo().CreateFixedObject(/*Size*/ 2, /*Offset*/-2, true);
+      FuncInfo->setSavedSRIndex(SavedSRFrameIndex);
+    }
+
+    MVT PtrVT = getPointerTy(DAG.getDataLayout());
+    SDValue FI = DAG.getFrameIndex(SavedSRFrameIndex, PtrVT);
+
+    SDValue Chain = Op->getOperand(0);
+    SDLoc DL(Op);
+
+    // Load a saved copy of status register.
+    SDValue SR =
+        DAG.getLoad(MVT::i16, DL, Chain, FI,
+                    MachinePointerInfo::getFixedStack(MF, SavedSRFrameIndex));
+
+    SDValue Result;
+    if (IntNo == Intrinsic::msp430_bis_saved_status) {
+      Result = DAG.getNode(ISD::OR, DL, MVT::i16, SR, Op->getOperand(2));
+    } else {
+      // IntNo == Intrinsic::msp430_bic_saved_status
+      Result = DAG.getNOT(DL, Op->getOperand(2), MVT::i16);
+      Result = DAG.getNode(ISD::AND, DL, MVT::i16, SR, Result);
+    }
+
+    // Store the result.
+    Chain =
+        DAG.getStore(SR.getValue(1), DL, Result, FI,
+                     MachinePointerInfo::getFixedStack(MF, SavedSRFrameIndex));
+    SDValue Ops[2] = { SR.getValue(0), Chain };
+    return DAG.getMergeValues(Ops, DL);
+  }
+  return SDValue();
 }
 
 SDValue MSP430TargetLowering::LowerShifts(SDValue Op,
