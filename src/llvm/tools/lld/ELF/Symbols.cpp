@@ -38,6 +38,7 @@ Defined *ElfSym::GlobalOffsetTable;
 Defined *ElfSym::MipsGp;
 Defined *ElfSym::MipsGpDisp;
 Defined *ElfSym::MipsLocalGp;
+Defined *ElfSym::RelaIpltStart;
 Defined *ElfSym::RelaIpltEnd;
 
 static uint64_t getSymVA(const Symbol &Sym, int64_t &Addend) {
@@ -144,17 +145,8 @@ uint64_t Symbol::getPPC64LongBranchOffset() const {
 }
 
 uint64_t Symbol::getPltVA() const {
-  if (this->IsInIplt) {
-    if (Config->ZRetpolineplt)
-      return In.Iplt->getVA() + Target->getPltEntryOffset(PltIndex);
-    return In.Iplt->getVA() + PltIndex * Target->PltEntrySize;
-  }
-  return In.Plt->getVA() + Target->getPltEntryOffset(PltIndex);
-}
-
-uint64_t Symbol::getPltOffset() const {
-  assert(!this->IsInIplt);
-  return Target->getPltEntryOffset(PltIndex);
+  PltSection *Plt = IsInIplt ? In.Iplt : In.Plt;
+  return Plt->getVA() + Plt->HeaderSize + PltIndex * Target->PltEntrySize;
 }
 
 uint64_t Symbol::getPPC64LongBranchTableVA() const {
