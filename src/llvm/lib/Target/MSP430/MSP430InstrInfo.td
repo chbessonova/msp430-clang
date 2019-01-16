@@ -673,7 +673,7 @@ def SWPB16r : II16r<0b001,
 
 } // Constraints = "$src = $dst"
 
-// Indexed (memory), indirect register and indirect autoincrement modes
+// Indexed, indirect register and indirect autoincrement modes
 let Defs = [SR] in {
 def RRA8m  : II8m<0b010,
                    (outs), (ins memsrc:$src),

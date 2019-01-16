@@ -13,6 +13,7 @@
 //===----------------------------------------------------------------------===//
 //
 
+#include "llvm/Object/Wasm.h"
 #include "llvm/ObjectYAML/ObjectYAML.h"
 #include "llvm/Support/Endian.h"
 #include "llvm/Support/LEB128.h"
@@ -104,7 +105,7 @@ static int writeInitExpr(const wasm::WasmInitExpr &InitExpr, raw_ostream &OS) {
   case wasm::WASM_OPCODE_F64_CONST:
     writeUint64(OS, InitExpr.Value.Float64);
     break;
-  case wasm::WASM_OPCODE_GET_GLOBAL:
+  case wasm::WASM_OPCODE_GLOBAL_GET:
     encodeULEB128(InitExpr.Value.Global, OS);
     break;
   default:
@@ -140,6 +141,10 @@ int WasmWriter::writeSectionContent(raw_ostream &OS,
   encodeULEB128(Section.MemoryAlignment, OS);
   encodeULEB128(Section.TableSize, OS);
   encodeULEB128(Section.TableAlignment, OS);
+  encodeULEB128(Section.Needed.size(), OS);
+  for (StringRef Needed : Section.Needed) {
+    writeStringRef(Needed, OS);
+  }
   return 0;
 }
 
@@ -512,7 +517,15 @@ int WasmWriter::writeWasm(raw_ostream &OS) {
   writeUint32(OS, Obj.Header.Version);
 
   // Write each section
+  llvm::object::WasmSectionOrderChecker Checker;
   for (const std::unique_ptr<WasmYAML::Section> &Sec : Obj.Sections) {
+    StringRef SecName = "";
+    if (auto S = dyn_cast<WasmYAML::CustomSection>(Sec.get()))
+      SecName = S->Name;
+    if (!Checker.isValidSectionOrder(Sec->Type, SecName)) {
+      errs() << "Out of order section type: " << Sec->Type << "\n";
+      return 1;
+    }
     encodeULEB128(Sec->Type, OS);
     std::string OutString;
     raw_string_ostream StringStream(OutString);

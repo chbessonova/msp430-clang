@@ -3720,16 +3720,16 @@ Error BitcodeReader::parseFunctionBody(Function *F) {
           return error("EXTRACTVAL: Invalid type");
         if ((unsigned)Index != Index)
           return error("Invalid value");
-        if (IsStruct && Index >= CurTy->subtypes().size())
+        if (IsStruct && Index >= CurTy->getStructNumElements())
           return error("EXTRACTVAL: Invalid struct index");
         if (IsArray && Index >= CurTy->getArrayNumElements())
           return error("EXTRACTVAL: Invalid array index");
         EXTRACTVALIdx.push_back((unsigned)Index);
 
         if (IsStruct)
-          CurTy = CurTy->subtypes()[Index];
+          CurTy = CurTy->getStructElementType(Index);
         else
-          CurTy = CurTy->subtypes()[0];
+          CurTy = CurTy->getArrayElementType();
       }
 
       I = ExtractValueInst::Create(Agg, EXTRACTVALIdx);
@@ -3762,16 +3762,16 @@ Error BitcodeReader::parseFunctionBody(Function *F) {
           return error("INSERTVAL: Invalid type");
         if ((unsigned)Index != Index)
           return error("Invalid value");
-        if (IsStruct && Index >= CurTy->subtypes().size())
+        if (IsStruct && Index >= CurTy->getStructNumElements())
           return error("INSERTVAL: Invalid struct index");
         if (IsArray && Index >= CurTy->getArrayNumElements())
           return error("INSERTVAL: Invalid array index");
 
         INSERTVALIdx.push_back((unsigned)Index);
         if (IsStruct)
-          CurTy = CurTy->subtypes()[Index];
+          CurTy = CurTy->getStructElementType(Index);
         else
-          CurTy = CurTy->subtypes()[0];
+          CurTy = CurTy->getArrayElementType();
       }
 
       if (CurTy != Val->getType())
@@ -4918,7 +4918,7 @@ void ModuleSummaryIndexBitcodeReader::setValueGUID(
   ValueIdToValueInfoMap[ValueID] = std::make_pair(
       TheIndex.getOrInsertValueInfo(
           ValueGUID,
-          UseStrtab ? ValueName : TheIndex.saveString(ValueName.str())),
+          UseStrtab ? ValueName : TheIndex.saveString(ValueName)),
       OriginalNameID);
 }
 
@@ -5247,9 +5247,9 @@ Error ModuleSummaryIndexBitcodeReader::parseEntireSummary(unsigned ID) {
   }
   const uint64_t Version = Record[0];
   const bool IsOldProfileFormat = Version == 1;
-  if (Version < 1 || Version > 5)
+  if (Version < 1 || Version > 6)
     return error("Invalid summary version " + Twine(Version) +
-                 ", 1, 2, 3, 4 or 5 expected");
+                 ". Version should be in the range [1-6].");
   Record.clear();
 
   // Keep around the last seen summary to be used when we see an optional
@@ -5294,15 +5294,30 @@ Error ModuleSummaryIndexBitcodeReader::parseEntireSummary(unsigned ID) {
       break;
     case bitc::FS_FLAGS: {  // [flags]
       uint64_t Flags = Record[0];
-      // Scan flags (set only on the combined index).
-      assert(Flags <= 0x3 && "Unexpected bits in flag");
+      // Scan flags.
+      assert(Flags <= 0x1f && "Unexpected bits in flag");
 
       // 1 bit: WithGlobalValueDeadStripping flag.
+      // Set on combined index only.
       if (Flags & 0x1)
         TheIndex.setWithGlobalValueDeadStripping();
       // 1 bit: SkipModuleByDistributedBackend flag.
+      // Set on combined index only.
       if (Flags & 0x2)
         TheIndex.setSkipModuleByDistributedBackend();
+      // 1 bit: HasSyntheticEntryCounts flag.
+      // Set on combined index only.
+      if (Flags & 0x4)
+        TheIndex.setHasSyntheticEntryCounts();
+      // 1 bit: DisableSplitLTOUnit flag.
+      // Set on per module indexes. It is up to the client to validate
+      // the consistency of this flag across modules being linked.
+      if (Flags & 0x8)
+        TheIndex.setEnableSplitLTOUnit();
+      // 1 bit: PartiallySplitLTOUnits flag.
+      // Set on combined index only.
+      if (Flags & 0x10)
+        TheIndex.setPartiallySplitLTOUnits();
       break;
     }
     case bitc::FS_VALUE_GUID: { // [valueid, refguid]
@@ -5358,8 +5373,8 @@ Error ModuleSummaryIndexBitcodeReader::parseEntireSummary(unsigned ID) {
           IsOldProfileFormat, HasProfile, HasRelBF);
       setImmutableRefs(Refs, NumImmutableRefs);
       auto FS = llvm::make_unique<FunctionSummary>(
-          Flags, InstCount, getDecodedFFlags(RawFunFlags), std::move(Refs),
-          std::move(Calls), std::move(PendingTypeTests),
+          Flags, InstCount, getDecodedFFlags(RawFunFlags), /*EntryCount=*/0,
+          std::move(Refs), std::move(Calls), std::move(PendingTypeTests),
           std::move(PendingTypeTestAssumeVCalls),
           std::move(PendingTypeCheckedLoadVCalls),
           std::move(PendingTypeTestAssumeConstVCalls),
@@ -5437,18 +5452,25 @@ Error ModuleSummaryIndexBitcodeReader::parseEntireSummary(unsigned ID) {
       uint64_t RawFlags = Record[2];
       unsigned InstCount = Record[3];
       uint64_t RawFunFlags = 0;
+      uint64_t EntryCount = 0;
       unsigned NumRefs = Record[4];
       unsigned NumImmutableRefs = 0;
       int RefListStartIndex = 5;
 
       if (Version >= 4) {
         RawFunFlags = Record[4];
-        NumRefs = Record[5];
         RefListStartIndex = 6;
+        size_t NumRefsIndex = 5;
         if (Version >= 5) {
-          NumImmutableRefs = Record[6];
           RefListStartIndex = 7;
+          if (Version >= 6) {
+            NumRefsIndex = 6;
+            EntryCount = Record[5];
+            RefListStartIndex = 8;
+          }
+          NumImmutableRefs = Record[RefListStartIndex - 1];
         }
+        NumRefs = Record[NumRefsIndex];
       }
 
       auto Flags = getDecodedGVSummaryFlags(RawFlags, Version);
@@ -5464,8 +5486,8 @@ Error ModuleSummaryIndexBitcodeReader::parseEntireSummary(unsigned ID) {
       ValueInfo VI = getValueInfoFromValueId(ValueID).first;
       setImmutableRefs(Refs, NumImmutableRefs);
       auto FS = llvm::make_unique<FunctionSummary>(
-          Flags, InstCount, getDecodedFFlags(RawFunFlags), std::move(Refs),
-          std::move(Edges), std::move(PendingTypeTests),
+          Flags, InstCount, getDecodedFFlags(RawFunFlags), EntryCount,
+          std::move(Refs), std::move(Edges), std::move(PendingTypeTests),
           std::move(PendingTypeTestAssumeVCalls),
           std::move(PendingTypeCheckedLoadVCalls),
           std::move(PendingTypeTestAssumeConstVCalls),
@@ -5907,6 +5929,46 @@ Expected<std::unique_ptr<ModuleSummaryIndex>> BitcodeModule::getSummary() {
   return std::move(Index);
 }
 
+static Expected<bool> getEnableSplitLTOUnitFlag(BitstreamCursor &Stream,
+                                                unsigned ID) {
+  if (Stream.EnterSubBlock(ID))
+    return error("Invalid record");
+  SmallVector<uint64_t, 64> Record;
+
+  while (true) {
+    BitstreamEntry Entry = Stream.advanceSkippingSubblocks();
+
+    switch (Entry.Kind) {
+    case BitstreamEntry::SubBlock: // Handled for us already.
+    case BitstreamEntry::Error:
+      return error("Malformed block");
+    case BitstreamEntry::EndBlock:
+      // If no flags record found, conservatively return true to mimic
+      // behavior before this flag was added.
+      return true;
+    case BitstreamEntry::Record:
+      // The interesting case.
+      break;
+    }
+
+    // Look for the FS_FLAGS record.
+    Record.clear();
+    auto BitCode = Stream.readRecord(Entry.ID, Record);
+    switch (BitCode) {
+    default: // Default behavior: ignore.
+      break;
+    case bitc::FS_FLAGS: { // [flags]
+      uint64_t Flags = Record[0];
+      // Scan flags.
+      assert(Flags <= 0x1f && "Unexpected bits in flag");
+
+      return Flags & 0x8;
+    }
+    }
+  }
+  llvm_unreachable("Exit infinite loop");
+}
+
 // Check if the given bitcode buffer contains a global value summary block.
 Expected<BitcodeLTOInfo> BitcodeModule::getLTOInfo() {
   BitstreamCursor Stream(Buffer);
@@ -5922,14 +5984,27 @@ Expected<BitcodeLTOInfo> BitcodeModule::getLTOInfo() {
     case BitstreamEntry::Error:
       return error("Malformed block");
     case BitstreamEntry::EndBlock:
-      return BitcodeLTOInfo{/*IsThinLTO=*/false, /*HasSummary=*/false};
+      return BitcodeLTOInfo{/*IsThinLTO=*/false, /*HasSummary=*/false,
+                            /*EnableSplitLTOUnit=*/false};
 
     case BitstreamEntry::SubBlock:
-      if (Entry.ID == bitc::GLOBALVAL_SUMMARY_BLOCK_ID)
-        return BitcodeLTOInfo{/*IsThinLTO=*/true, /*HasSummary=*/true};
+      if (Entry.ID == bitc::GLOBALVAL_SUMMARY_BLOCK_ID) {
+        Expected<bool> EnableSplitLTOUnit =
+            getEnableSplitLTOUnitFlag(Stream, Entry.ID);
+        if (!EnableSplitLTOUnit)
+          return EnableSplitLTOUnit.takeError();
+        return BitcodeLTOInfo{/*IsThinLTO=*/true, /*HasSummary=*/true,
+                              *EnableSplitLTOUnit};
+      }
 
-      if (Entry.ID == bitc::FULL_LTO_GLOBALVAL_SUMMARY_BLOCK_ID)
-        return BitcodeLTOInfo{/*IsThinLTO=*/false, /*HasSummary=*/true};
+      if (Entry.ID == bitc::FULL_LTO_GLOBALVAL_SUMMARY_BLOCK_ID) {
+        Expected<bool> EnableSplitLTOUnit =
+            getEnableSplitLTOUnitFlag(Stream, Entry.ID);
+        if (!EnableSplitLTOUnit)
+          return EnableSplitLTOUnit.takeError();
+        return BitcodeLTOInfo{/*IsThinLTO=*/false, /*HasSummary=*/true,
+                              *EnableSplitLTOUnit};
+      }
 
       // Ignore other sub-blocks.
       if (Stream.SkipBlock())

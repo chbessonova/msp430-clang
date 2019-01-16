@@ -40,4 +40,3 @@
 // RUN: %clang  -### -target msp430 %s -mhwmult=32bit -mmcu=msp430f147 2>&1 | FileCheck --check-prefix=WRN-MISMCH %s
 // RUN: %clang  -### -target msp430 %s -mhwmult=f5series -mmcu=msp430f4783 2>&1 | FileCheck --check-prefix=WRN-MISMCH %s
 // WRN-MISMCH: warning: the given MCU supports {{.*}} hardware multiply, but -mhwmult is set to {{.*}}
-

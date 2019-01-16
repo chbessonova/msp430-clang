@@ -44,6 +44,7 @@ The major indexing objects are:
 Most object information is exposed using properties, when the underlying API
 call is efficient.
 """
+from __future__ import absolute_import, division, print_function
 
 # TODO
 # ====
@@ -63,7 +64,6 @@ call is efficient.
 # o implement additional SourceLocation, SourceRange, and File methods.
 
 from ctypes import *
-import collections
 
 import clang.enumerations
 
@@ -109,8 +109,6 @@ if sys.version_info[0] == 3:
             return x
         return x.encode('utf8')
 
-    xrange = range
-
 elif sys.version_info[0] == 2:
     # Python 2 strings are utf8 byte strings, no translation is needed for
     # C-interop.
@@ -123,6 +121,14 @@ elif sys.version_info[0] == 2:
 
     def b(x):
         return x
+
+# Importing ABC-s directly from collections is deprecated since Python 3.7,
+# will stop working in Python 3.8.
+# See: https://docs.python.org/dev/whatsnew/3.7.html#id3
+if sys.version_info[:2] >= (3, 7):
+    from collections import abc as collections_abc
+else:
+    import collections as collections_abc
 
 # We only support PathLike objects on Python version with os.fspath present
 # to be consistent with the Python standard library. On older Python versions
@@ -400,7 +406,7 @@ class Diagnostic(object):
 
     @property
     def ranges(self):
-        class RangeIterator:
+        class RangeIterator(object):
             def __init__(self, diag):
                 self.diag = diag
 
@@ -416,7 +422,7 @@ class Diagnostic(object):
 
     @property
     def fixits(self):
-        class FixItIterator:
+        class FixItIterator(object):
             def __init__(self, diag):
                 self.diag = diag
 
@@ -436,7 +442,7 @@ class Diagnostic(object):
 
     @property
     def children(self):
-        class ChildDiagnosticsIterator:
+        class ChildDiagnosticsIterator(object):
             def __init__(self, diag):
                 self.diag_set = conf.lib.clang_getChildDiagnostics(diag)
 
@@ -556,7 +562,7 @@ class TokenGroup(object):
 
         token_group = TokenGroup(tu, tokens_memory, tokens_count)
 
-        for i in xrange(0, count):
+        for i in range(0, count):
             token = Token()
             token.int_data = tokens_array[i].int_data
             token.ptr_data = tokens_array[i].ptr_data
@@ -2182,7 +2188,7 @@ class Type(Structure):
         The returned object is iterable and indexable. Each item in the
         container is a Type instance.
         """
-        class ArgumentsIterator(collections.Sequence):
+        class ArgumentsIterator(collections_abc.Sequence):
             def __init__(self, parent):
                 self.parent = parent
                 self.length = None
@@ -2475,8 +2481,8 @@ SpellingCache = {
             # 20: CompletionChunk.Kind("VerticalSpace")
 }
 
-class CompletionChunk:
-    class Kind:
+class CompletionChunk(object):
+    class Kind(object):
         def __init__(self, name):
             self.name = name
 
@@ -2563,7 +2569,7 @@ completionChunkKindMap = {
             20: CompletionChunk.Kind("VerticalSpace")}
 
 class CompletionString(ClangObject):
-    class Availability:
+    class Availability(object):
         def __init__(self, name):
             self.name = name
 
@@ -2656,7 +2662,7 @@ class CodeCompletionResults(ClangObject):
 
     @property
     def diagnostics(self):
-        class DiagnosticsItr:
+        class DiagnosticsItr(object):
             def __init__(self, ccr):
                 self.ccr= ccr
 
@@ -2958,7 +2964,7 @@ class TranslationUnit(ClangObject):
         """
         Return an iterable (and indexable) object containing the diagnostics.
         """
-        class DiagIterator:
+        class DiagIterator(object):
             def __init__(self, tu):
                 self.tu = tu
 
@@ -3190,7 +3196,7 @@ class CompileCommand(object):
         Invariant : the first argument is the compiler executable
         """
         length = conf.lib.clang_CompileCommand_getNumArgs(self.cmd)
-        for i in xrange(length):
+        for i in range(length):
             yield conf.lib.clang_CompileCommand_getArg(self.cmd, i)
 
 class CompileCommands(object):
@@ -4090,7 +4096,7 @@ def register_functions(lib, ignore_errors):
     for f in functionList:
         register(f)
 
-class Config:
+class Config(object):
     library_path = None
     library_file = None
     compatibility_check = True

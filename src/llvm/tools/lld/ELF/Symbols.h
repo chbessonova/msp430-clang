@@ -172,7 +172,6 @@ public:
   uint64_t getGotPltOffset() const;
   uint64_t getGotPltVA() const;
   uint64_t getPltVA() const;
-  uint64_t getPltOffset() const;
   uint64_t getPPC64LongBranchTableVA() const;
   uint64_t getPPC64LongBranchOffset() const;
   uint64_t getSize() const;
@@ -353,7 +352,8 @@ struct ElfSym {
   static Defined *MipsGpDisp;
   static Defined *MipsLocalGp;
 
-  // __rela_iplt_end or __rel_iplt_end
+  // __rel{,a}_iplt_{start,end} symbols.
+  static Defined *RelaIpltStart;
   static Defined *RelaIpltEnd;
 };
 

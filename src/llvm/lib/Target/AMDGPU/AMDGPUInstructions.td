@@ -135,6 +135,12 @@ def brtarget   : Operand<OtherVT>;
 // Misc. PatFrags
 //===----------------------------------------------------------------------===//
 
+class HasOneUseUnaryOp<SDPatternOperator op> : PatFrag<
+  (ops node:$src0),
+  (op $src0),
+  [{ return N->hasOneUse(); }]
+>;
+
 class HasOneUseBinOp<SDPatternOperator op> : PatFrag<
   (ops node:$src0, node:$src1),
   (op $src0, $src1),
@@ -164,6 +170,8 @@ def and_oneuse : HasOneUseBinOp<and>;
 def or_oneuse : HasOneUseBinOp<or>;
 def xor_oneuse : HasOneUseBinOp<xor>;
 } // Properties = [SDNPCommutative, SDNPAssociative]
+
+def not_oneuse : HasOneUseUnaryOp<not>;
 
 def add_oneuse : HasOneUseBinOp<add>;
 def sub_oneuse : HasOneUseBinOp<sub>;
@@ -834,6 +842,7 @@ def cvt_flr_i32_f32 : PatFrag <
   [{ (void)N; return TM.Options.NoNaNsFPMath; }]
 >;
 
+let AddedComplexity = 2 in {
 class IMad24Pat<Instruction Inst, bit HasClamp = 0> : AMDGPUPat <
   (add (AMDGPUmul_i24 i32:$src0, i32:$src1), i32:$src2),
   !if(HasClamp, (Inst $src0, $src1, $src2, (i1 0)),
@@ -845,6 +854,7 @@ class UMad24Pat<Instruction Inst, bit HasClamp = 0> : AMDGPUPat <
   !if(HasClamp, (Inst $src0, $src1, $src2, (i1 0)),
                 (Inst $src0, $src1, $src2))
 >;
+} // AddedComplexity.
 
 class RcpPat<Instruction RcpInst, ValueType vt> : AMDGPUPat <
   (fdiv FP_ONE, vt:$src),

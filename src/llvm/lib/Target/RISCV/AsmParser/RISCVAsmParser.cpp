@@ -14,6 +14,7 @@
 #include "Utils/RISCVBaseInfo.h"
 #include "Utils/RISCVMatInt.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringSwitch.h"
 #include "llvm/MC/MCAssembler.h"
 #include "llvm/MC/MCContext.h"
@@ -42,6 +43,8 @@ namespace {
 struct RISCVOperand;
 
 class RISCVAsmParser : public MCTargetAsmParser {
+  SmallVector<FeatureBitset, 4> FeatureBitStack;
+
   SMLoc getLoc() const { return getParser().getTok().getLoc(); }
   bool isRV64() const { return getSTI().hasFeature(RISCV::Feature64Bit); }
 
@@ -118,6 +121,20 @@ class RISCVAsmParser : public MCTargetAsmParser {
     }
   }
 
+  void pushFeatureBits() {
+    FeatureBitStack.push_back(getSTI().getFeatureBits());
+  }
+
+  bool popFeatureBits() {
+    if (FeatureBitStack.empty())
+      return true;
+
+    FeatureBitset FeatureBits = FeatureBitStack.pop_back_val();
+    copySTI().setFeatureBits(FeatureBits);
+    setAvailableFeatures(ComputeAvailableFeatures(FeatureBits));
+
+    return false;
+  }
 public:
   enum RISCVMatchResultTy {
     Match_Dummy = FIRST_TARGET_MATCH_RESULT_TY,
@@ -293,12 +310,14 @@ public:
     return RISCVFPRndMode::stringToRoundingMode(Str) != RISCVFPRndMode::Invalid;
   }
 
-  bool isImmXLen() const {
+  bool isImmXLenLI() const {
     int64_t Imm;
     RISCVMCExpr::VariantKind VK;
     if (!isImm())
       return false;
     bool IsConstantImm = evaluateConstantImm(getImm(), Imm, VK);
+    if (VK == RISCVMCExpr::VK_RISCV_LO || VK == RISCVMCExpr::VK_RISCV_PCREL_LO)
+      return true;
     // Given only Imm, ensuring that the actually specified constant is either
     // a signed or unsigned 64-bit number is unfortunately impossible.
     bool IsInRange = isRV64() ? true : isInt<32>(Imm) || isUInt<32>(Imm);
@@ -765,7 +784,7 @@ bool RISCVAsmParser::MatchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
   switch(Result) {
   default:
     break;
-  case Match_InvalidImmXLen:
+  case Match_InvalidImmXLenLI:
     if (isRV64()) {
       SMLoc ErrorLoc = ((RISCVOperand &)*Operands[ErrorInfo]).getStartLoc();
       return Error(ErrorLoc, "operand must be a constant 64-bit integer");
@@ -1014,17 +1033,10 @@ OperandMatchResultTy RISCVAsmParser::parseImmediate(OperandVector &Operands) {
   case AsmToken::Plus:
   case AsmToken::Integer:
   case AsmToken::String:
+  case AsmToken::Identifier:
     if (getParser().parseExpression(Res))
       return MatchOperand_ParseFail;
     break;
-  case AsmToken::Identifier: {
-    StringRef Identifier;
-    if (getParser().parseIdentifier(Identifier))
-      return MatchOperand_ParseFail;
-    MCSymbol *Sym = getContext().getOrCreateSymbol(Identifier);
-    Res = MCSymbolRefExpr::create(Sym, MCSymbolRefExpr::VK_None, getContext());
-    break;
-  }
   case AsmToken::Percent:
     return parseOperandWithModifier(Operands);
   }
@@ -1285,6 +1297,33 @@ bool RISCVAsmParser::parseDirectiveOption() {
 
   StringRef Option = Tok.getIdentifier();
 
+  if (Option == "push") {
+    getTargetStreamer().emitDirectiveOptionPush();
+
+    Parser.Lex();
+    if (Parser.getTok().isNot(AsmToken::EndOfStatement))
+      return Error(Parser.getTok().getLoc(),
+                   "unexpected token, expected end of statement");
+
+    pushFeatureBits();
+    return false;
+  }
+
+  if (Option == "pop") {
+    SMLoc StartLoc = Parser.getTok().getLoc();
+    getTargetStreamer().emitDirectiveOptionPop();
+
+    Parser.Lex();
+    if (Parser.getTok().isNot(AsmToken::EndOfStatement))
+      return Error(Parser.getTok().getLoc(),
+                   "unexpected token, expected end of statement");
+
+    if (popFeatureBits())
+      return Error(StartLoc, ".option pop with no .option push");
+
+    return false;
+  }
+
   if (Option == "rvc") {
     getTargetStreamer().emitDirectiveOptionRVC();
 
@@ -1335,7 +1374,8 @@ bool RISCVAsmParser::parseDirectiveOption() {
 
   // Unknown option.
   Warning(Parser.getTok().getLoc(),
-          "unknown option, expected 'rvc', 'norvc', 'relax' or 'norelax'");
+          "unknown option, expected 'push', 'pop', 'rvc', 'norvc', 'relax' or "
+          "'norelax'");
   Parser.eatToEndOfStatement();
   return false;
 }
@@ -1404,7 +1444,17 @@ bool RISCVAsmParser::processInstruction(MCInst &Inst, SMLoc IDLoc,
   Inst.setLoc(IDLoc);
 
   if (Inst.getOpcode() == RISCV::PseudoLI) {
-    auto Reg = Inst.getOperand(0).getReg();
+    unsigned Reg = Inst.getOperand(0).getReg();
+    const MCOperand &Op1 = Inst.getOperand(1);
+    if (Op1.isExpr()) {
+      // We must have li reg, %lo(sym) or li reg, %pcrel_lo(sym) or similar.
+      // Just convert to an addi. This allows compatibility with gas.
+      emitToStreamer(Out, MCInstBuilder(RISCV::ADDI)
+                              .addReg(Reg)
+                              .addReg(RISCV::X0)
+                              .addExpr(Op1.getExpr()));
+      return false;
+    }
     int64_t Imm = Inst.getOperand(1).getImm();
     // On RV32 the immediate here can either be a signed or an unsigned
     // 32-bit number. Sign extension has to be performed to ensure that Imm

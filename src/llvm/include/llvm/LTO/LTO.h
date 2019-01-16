@@ -60,6 +60,19 @@ void thinLTOInternalizeAndPromoteInIndex(
     ModuleSummaryIndex &Index,
     function_ref<bool(StringRef, GlobalValue::GUID)> isExported);
 
+/// Computes a unique hash for the Module considering the current list of
+/// export/import and other global analysis results.
+/// The hash is produced in \p Key.
+void computeLTOCacheKey(
+    SmallString<40> &Key, const lto::Config &Conf,
+    const ModuleSummaryIndex &Index, StringRef ModuleID,
+    const FunctionImporter::ImportMapTy &ImportList,
+    const FunctionImporter::ExportSetTy &ExportList,
+    const std::map<GlobalValue::GUID, GlobalValue::LinkageTypes> &ResolvedODR,
+    const GVSummaryMapTy &DefinedGlobals,
+    const std::set<GlobalValue::GUID> &CfiFunctionDefs = {},
+    const std::set<GlobalValue::GUID> &CfiFunctionDecls = {});
+
 namespace lto {
 
 /// Given the original \p Path to an output file, replace any path
@@ -387,6 +400,9 @@ private:
   Error runThinLTO(AddStreamFn AddStream, NativeObjectCache Cache);
 
   mutable bool CalledGetMaxTasks = false;
+
+  // Use Optional to distinguish false from not yet initialized.
+  Optional<bool> EnableSplitLTOUnit;
 };
 
 /// The resolution for a symbol. The linker must provide a SymbolResolution for
