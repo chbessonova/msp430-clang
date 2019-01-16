@@ -1,19 +1,17 @@
 import("//llvm/utils/gn/build/buildflags.gni")
 import("//llvm/utils/gn/build/mac_sdk.gni")
 import("//llvm/utils/gn/build/toolchain/compiler.gni")
-import("//llvm/utils/gn/build/enable_threads.gni")
+import("//llvm/utils/gn/build/toolchain/target_flags.gni")
 
 config("compiler_defaults") {
-  # FIXME: Don't define this globally here.
-  if (host_os != "win") {
-    defines = [ "LLVM_ON_UNIX" ]
-  }
+  defines = []
 
   if (!llvm_enable_assertions) {
     defines += [ "NDEBUG" ]
   }
 
-  cflags = []
+  cflags = target_flags + target_cflags
+  ldflags = target_flags + target_ldflags
 
   if (host_os == "mac" && clang_base_path != "") {
     cflags += [
@@ -32,7 +30,6 @@ config("compiler_defaults") {
     cflags_cc = [
       "-std=c++11",
       "-fno-exceptions",
-      "-fno-rtti",
       "-fvisibility-inlines-hidden",
     ]
   } else {
@@ -56,10 +53,7 @@ config("compiler_defaults") {
       "_UNICODE",
       "UNICODE",
     ]
-    cflags += [
-      "/EHs-c-",
-      "/GR-",
-    ]
+    cflags += [ "/EHs-c-" ]
 
     # The MSVC default value (1 MB) is not enough for parsing recursive C++
     # templates in Clang.
@@ -112,6 +106,18 @@ config("compiler_defaults") {
       cflags += [ "-Wno-nonportable-include-path" ]
     }
   }
+
+  if (use_lld) {
+    ldflags += [ "-fuse-ld=lld" ]
+  }
+}
+
+config("no_rtti") {
+  if (current_os == "win") {
+    cflags_cc = [ "/GR-" ]
+  } else {
+    cflags_cc = [ "-fno-rtti" ]
+  }
 }
 
 config("llvm_code") {
@@ -135,19 +141,17 @@ config("clang_code") {
   ]
 }
 
+config("crt_code") {
+  include_dirs = [ "//compiler-rt/lib" ]
+  cflags = [
+    "-fPIC",
+    "-funwind-tables",
+    "-gline-tables-only",
+  ]
+}
+
 config("warn_covered_switch_default") {
   if (is_clang) {
     cflags = [ "-Wcovered-switch-default" ]
-  }
-}
-
-config("pthread_config") {
-  visibility = [ ":pthread" ]
-  libs = [ "pthread" ]
-}
-
-group("pthread") {
-  if (llvm_enable_threads && host_os != "win") {
-    public_configs = [ ":pthread_config" ]
   }
 }

@@ -80,6 +80,13 @@ RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
   for (auto VT : {MVT::i1, MVT::i8, MVT::i16})
     setOperationAction(ISD::SIGN_EXTEND_INREG, VT, Expand);
 
+  if (Subtarget.is64Bit()) {
+    setTargetDAGCombine(ISD::SHL);
+    setTargetDAGCombine(ISD::SRL);
+    setTargetDAGCombine(ISD::SRA);
+    setTargetDAGCombine(ISD::ANY_EXTEND);
+  }
+
   if (!Subtarget.hasStdExtM()) {
     setOperationAction(ISD::MUL, XLenVT, Expand);
     setOperationAction(ISD::MULHS, XLenVT, Expand);
@@ -111,10 +118,8 @@ RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
       ISD::SETUGT, ISD::SETUGE, ISD::SETULT, ISD::SETULE, ISD::SETUNE,
       ISD::SETGT,  ISD::SETGE,  ISD::SETNE};
 
-  // TODO: add proper support for the various FMA variants
-  // (FMADD.S, FMSUB.S, FNMSUB.S, FNMADD.S).
   ISD::NodeType FPOpToExtend[] = {
-      ISD::FSIN, ISD::FCOS, ISD::FSINCOS, ISD::FPOW, ISD::FMA, ISD::FREM};
+      ISD::FSIN, ISD::FCOS, ISD::FSINCOS, ISD::FPOW, ISD::FREM};
 
   if (Subtarget.hasStdExtF()) {
     setOperationAction(ISD::FMINNUM, MVT::f32, Legal);
@@ -186,6 +191,7 @@ bool RISCVTargetLowering::getTgtMemIntrinsic(IntrinsicInfo &Info,
   case Intrinsic::riscv_masked_atomicrmw_min_i32:
   case Intrinsic::riscv_masked_atomicrmw_umax_i32:
   case Intrinsic::riscv_masked_atomicrmw_umin_i32:
+  case Intrinsic::riscv_masked_cmpxchg_i32:
     PointerType *PtrTy = cast<PointerType>(I.getArgOperand(0)->getType());
     Info.opc = ISD::INTRINSIC_W_CHAIN;
     Info.memVT = MVT::getVT(PtrTy->getElementType());
@@ -264,6 +270,10 @@ bool RISCVTargetLowering::isZExtFree(SDValue Val, EVT VT2) const {
   }
 
   return TargetLowering::isZExtFree(Val, VT2);
+}
+
+bool RISCVTargetLowering::isSExtCheaperThanZExt(EVT SrcVT, EVT DstVT) const {
+  return Subtarget.is64Bit() && SrcVT == MVT::i32 && DstVT == MVT::i64;
 }
 
 // Changes the condition code and swaps operands if necessary, so the SetCC
@@ -503,11 +513,71 @@ SDValue RISCVTargetLowering::lowerRETURNADDR(SDValue Op,
   return DAG.getCopyFromReg(DAG.getEntryNode(), DL, Reg, XLenVT);
 }
 
+// Return true if the given node is a shift with a non-constant shift amount.
+static bool isVariableShift(SDValue Val) {
+  switch (Val.getOpcode()) {
+  default:
+    return false;
+  case ISD::SHL:
+  case ISD::SRA:
+  case ISD::SRL:
+    return Val.getOperand(1).getOpcode() != ISD::Constant;
+  }
+}
+
+// Returns true if the given node is an sdiv, udiv, or urem with non-constant
+// operands.
+static bool isVariableSDivUDivURem(SDValue Val) {
+  switch (Val.getOpcode()) {
+  default:
+    return false;
+  case ISD::SDIV:
+  case ISD::UDIV:
+  case ISD::UREM:
+    return Val.getOperand(0).getOpcode() != ISD::Constant &&
+           Val.getOperand(1).getOpcode() != ISD::Constant;
+  }
+}
+
 SDValue RISCVTargetLowering::PerformDAGCombine(SDNode *N,
                                                DAGCombinerInfo &DCI) const {
+  SelectionDAG &DAG = DCI.DAG;
+
   switch (N->getOpcode()) {
   default:
     break;
+  case ISD::SHL:
+  case ISD::SRL:
+  case ISD::SRA: {
+    assert(Subtarget.getXLen() == 64 && "Combine should be 64-bit only");
+    if (!DCI.isBeforeLegalize())
+      break;
+    SDValue RHS = N->getOperand(1);
+    if (N->getValueType(0) != MVT::i32 || RHS->getOpcode() == ISD::Constant ||
+        (RHS->getOpcode() == ISD::AssertZext &&
+         cast<VTSDNode>(RHS->getOperand(1))->getVT().getSizeInBits() <= 5))
+      break;
+    SDValue LHS = N->getOperand(0);
+    SDLoc DL(N);
+    SDValue NewRHS =
+        DAG.getNode(ISD::AssertZext, DL, RHS.getValueType(), RHS,
+                    DAG.getValueType(EVT::getIntegerVT(*DAG.getContext(), 5)));
+    return DCI.CombineTo(
+        N, DAG.getNode(N->getOpcode(), DL, LHS.getValueType(), LHS, NewRHS));
+  }
+  case ISD::ANY_EXTEND: {
+    // If any-extending an i32 variable-length shift or sdiv/udiv/urem to i64,
+    // then instead sign-extend in order to increase the chance of being able
+    // to select the sllw/srlw/sraw/divw/divuw/remuw instructions.
+    SDValue Src = N->getOperand(0);
+    if (N->getValueType(0) != MVT::i64 || Src.getValueType() != MVT::i32)
+      break;
+    if (!isVariableShift(Src) &&
+        !(Subtarget.hasStdExtM() && isVariableSDivUDivURem(Src)))
+      break;
+    SDLoc DL(N);
+    return DCI.CombineTo(N, DAG.getNode(ISD::SIGN_EXTEND, DL, MVT::i64, Src));
+  }
   case RISCVISD::SplitF64: {
     // If the input to SplitF64 is just BuildPairF64 then the operation is
     // redundant. Instead, use BuildPairF64's operands directly.
@@ -1707,4 +1777,24 @@ Value *RISCVTargetLowering::emitMaskedAtomicRMWIntrinsic(
   }
 
   return Builder.CreateCall(LrwOpScwLoop, {AlignedAddr, Incr, Mask, Ordering});
+}
+
+TargetLowering::AtomicExpansionKind
+RISCVTargetLowering::shouldExpandAtomicCmpXchgInIR(
+    AtomicCmpXchgInst *CI) const {
+  unsigned Size = CI->getCompareOperand()->getType()->getPrimitiveSizeInBits();
+  if (Size == 8 || Size == 16)
+    return AtomicExpansionKind::MaskedIntrinsic;
+  return AtomicExpansionKind::None;
+}
+
+Value *RISCVTargetLowering::emitMaskedAtomicCmpXchgIntrinsic(
+    IRBuilder<> &Builder, AtomicCmpXchgInst *CI, Value *AlignedAddr,
+    Value *CmpVal, Value *NewVal, Value *Mask, AtomicOrdering Ord) const {
+  Value *Ordering = Builder.getInt32(static_cast<uint32_t>(Ord));
+  Type *Tys[] = {AlignedAddr->getType()};
+  Function *MaskedCmpXchg = Intrinsic::getDeclaration(
+      CI->getModule(), Intrinsic::riscv_masked_cmpxchg_i32, Tys);
+  return Builder.CreateCall(MaskedCmpXchg,
+                            {AlignedAddr, CmpVal, NewVal, Mask, Ordering});
 }

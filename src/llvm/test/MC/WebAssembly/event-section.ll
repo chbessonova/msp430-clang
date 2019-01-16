@@ -44,7 +44,7 @@ define i32 @test_throw1(i8* %p) {
 
 ; CHECK:        - Type:            CUSTOM
 ; CHECK-NEXT:     Name:            linking
-; CHECK-NEXT:     Version:         1
+; CHECK-NEXT:     Version:         2
 ; CHECK-NEXT:     SymbolTable:
 
 ; CHECK:            - Index:           1
@@ -53,6 +53,6 @@ define i32 @test_throw1(i8* %p) {
 ; CHECK-NEXT:         Flags:           [ BINDING_WEAK ]
 ; CHECK-NEXT:         Event:           0
 
-; SEC:          Type: EVENT (0xC)
+; SEC:          Type: EVENT (0xD)
 ; SEC-NEXT:     Size: 3
 ; SEC-NEXT:     Offset: 97

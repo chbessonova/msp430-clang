@@ -572,9 +572,9 @@ void X86AsmPrinter::EmitStartOfAsmFile(Module &M) {
 
       // Emitting an Elf_Prop for the CET properties.
       OutStreamer->EmitIntValue(ELF::GNU_PROPERTY_X86_FEATURE_1_AND, 4);
-      OutStreamer->EmitIntValue(WordSize, 4);               // data size
-      OutStreamer->EmitIntValue(FeatureFlagsAnd, WordSize); // data
-      EmitAlignment(WordSize == 4 ? 2 : 3);                 // padding
+      OutStreamer->EmitIntValue(4, 4);               // data size
+      OutStreamer->EmitIntValue(FeatureFlagsAnd, 4); // data
+      EmitAlignment(WordSize == 4 ? 2 : 3);          // padding
 
       OutStreamer->endSection(Nt);
       OutStreamer->SwitchSection(Cur);
@@ -674,7 +674,7 @@ void X86AsmPrinter::EmitEndOfAsmFile(Module &M) {
     emitNonLazyStubs(MMI, *OutStreamer);
 
     // Emit stack and fault map information.
-    SM.serializeToStackMapSection();
+    emitStackMaps(SM);
     FM.serializeToFaultMapSection();
 
     // This flag tells the linker that no global symbols contain code that fall
@@ -695,12 +695,12 @@ void X86AsmPrinter::EmitEndOfAsmFile(Module &M) {
   }
 
   if (TT.isOSBinFormatCOFF()) {
-    SM.serializeToStackMapSection();
+    emitStackMaps(SM);
     return;
   }
 
   if (TT.isOSBinFormatELF()) {
-    SM.serializeToStackMapSection();
+    emitStackMaps(SM);
     FM.serializeToFaultMapSection();
     return;
   }

@@ -93,6 +93,7 @@ add_llvm_target(AMDGPUCodeGen
   R600OptimizeVectorRegisters.cpp
   R600Packetizer.cpp
   R600RegisterInfo.cpp
+  SIAddIMGInit.cpp
   SIAnnotateControlFlow.cpp
   SIDebuggerInsertNops.cpp
   SIFixSGPRCopies.cpp
@@ -119,6 +120,8 @@ add_llvm_target(AMDGPUCodeGen
   SIShrinkInstructions.cpp
   SIWholeQuadMode.cpp
   GCNILPSched.cpp
+  GCNDPPCombine.cpp
+  SIModeRegister.cpp
   )
 
 add_subdirectory(AsmParser)
