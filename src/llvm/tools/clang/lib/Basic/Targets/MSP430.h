@@ -24,6 +24,7 @@ namespace targets {
 
 class LLVM_LIBRARY_VISIBILITY MSP430TargetInfo : public TargetInfo {
   static const char *const GCCRegNames[];
+  static const Builtin::Info BuiltinInfo[];
 
 public:
   MSP430TargetInfo(const llvm::Triple &Triple, const TargetOptions &)
@@ -48,10 +49,7 @@ public:
   void getTargetDefines(const LangOptions &Opts,
                         MacroBuilder &Builder) const override;
 
-  ArrayRef<Builtin::Info> getTargetBuiltins() const override {
-    // FIXME: Implement.
-    return None;
-  }
+  ArrayRef<Builtin::Info> getTargetBuiltins() const override;
 
   bool allowsLargerPreferedTypeAlignment() const override { return false; }
 

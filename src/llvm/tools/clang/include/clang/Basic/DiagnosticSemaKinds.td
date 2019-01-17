@@ -8309,6 +8309,8 @@ def err_hexagon_builtin_requires_hvx : Error<
   "builtin requires HVX">;
 def err_hexagon_builtin_unsupported_hvx : Error<
   "builtin is not supported on this version of HVX">;
+def err_msp430_builtin_not_isr_caller : Error<
+  "builtin is only available within interrupt routines">;
 
 def err_builtin_target_unsupported : Error<
   "builtin is not supported on this target">;

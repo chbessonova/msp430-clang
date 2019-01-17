@@ -13,6 +13,7 @@
 
 #include "MSP430.h"
 #include "clang/Basic/MacroBuilder.h"
+#include "clang/Basic/TargetBuiltins.h"
 
 using namespace clang;
 using namespace clang::targets;
@@ -21,6 +22,17 @@ const char *const MSP430TargetInfo::GCCRegNames[] = {
     "r0", "r1", "r2",  "r3",  "r4",  "r5",  "r6",  "r7",
     "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"
 };
+
+const Builtin::Info MSP430TargetInfo::BuiltinInfo[] = {
+#define BUILTIN(ID, TYPE, ATTRS)                                               \
+  {#ID, TYPE, ATTRS, nullptr, ALL_LANGUAGES, nullptr},
+#include "clang/Basic/BuiltinsMSP430.def"
+};
+
+ArrayRef<Builtin::Info> MSP430TargetInfo::getTargetBuiltins() const {
+  return llvm::makeArrayRef(
+    BuiltinInfo, clang::MSP430::LastTSBuiltin - Builtin::FirstTSBuiltin);
+}
 
 ArrayRef<const char *> MSP430TargetInfo::getGCCRegNames() const {
   return llvm::makeArrayRef(GCCRegNames);

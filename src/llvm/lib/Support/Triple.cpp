@@ -101,6 +101,8 @@ StringRef Triple::getArchTypePrefix(ArchType Kind) {
   case mips64:
   case mips64el:    return "mips";
 
+  case msp430:      return "msp430";
+
   case hexagon:     return "hexagon";
 
   case amdgcn:      return "amdgcn";

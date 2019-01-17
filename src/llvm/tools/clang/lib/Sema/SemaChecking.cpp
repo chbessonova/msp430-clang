@@ -1475,6 +1475,10 @@ Sema::CheckBuiltinFunctionCall(FunctionDecl *FDecl, unsigned BuiltinID,
         if (CheckPPCBuiltinFunctionCall(BuiltinID, TheCall))
           return ExprError();
         break;
+      case llvm::Triple::msp430:
+        if (CheckMSP430BuiltinFunctionCall(BuiltinID, TheCall))
+          return ExprError();
+        break;
       default:
         break;
     }
@@ -3917,6 +3921,23 @@ bool Sema::CheckX86BuiltinFunctionCall(unsigned BuiltinID, CallExpr *TheCall) {
   // range values. These need to code generate, but don't need to necessarily
   // make any sense. We use a warning that defaults to an error.
   return SemaBuiltinConstantArgRange(TheCall, i, l, u, /*RangeIsError*/ false);
+}
+
+bool Sema::CheckMSP430BuiltinFunctionCall(unsigned BuiltinID,
+                                          CallExpr *TheCall) {
+  switch (BuiltinID) {
+  default:
+    return false;
+  case MSP430::BI__bic_SR_register_on_exit:
+  case MSP430::BI__bis_SR_register_on_exit:
+    auto *FD = cast<FunctionDecl>(CurContext);
+    // These builtins can only be used inside interrupt handlers.
+    if (!FD->hasAttr<MSP430InterruptAttr>())
+      return
+        Diag(TheCall->getBeginLoc(), diag::err_msp430_builtin_not_isr_caller)
+             << TheCall->getSourceRange();
+  }
+  return false;
 }
 
 /// Given a FunctionDecl's FormatAttr, attempts to populate the FomatStringInfo
