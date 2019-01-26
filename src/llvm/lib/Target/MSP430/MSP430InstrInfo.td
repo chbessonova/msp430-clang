@@ -154,6 +154,7 @@ def cg16imm : Operand<i16>,
 //===----------------------------------------------------------------------===//
 
 def addr : ComplexPattern<iPTR, 2, "SelectAddr", [], []>;
+def addrIndReg : ComplexPattern<iPTR, 1, "SelectIndirectReg", [], [], 10>;
 
 //===----------------------------------------------------------------------===//
 // Pattern Fragments
@@ -288,11 +289,9 @@ let isCall = 1,
   def CALLr     : II16r<0b101,
                         (outs), (ins GR16:$rs),
                         "call\t$rs", [(MSP430call GR16:$rs)]>;
-  def CALLm     : II16m<0b101,
-                        (outs), (ins memsrc:$src),
-                        "call\t$src", [(MSP430call (load addr:$src))]>;
-  def CALLn     : II16n<0b101, (outs), (ins indreg:$rs), "call\t$rs", []>;
-  def CALLp     : II16p<0b101, (outs), (ins postreg:$rs), "call\t$rs", []>;
+  def CALLm     : II16m<0b101, (outs), (ins memsrc:$src), "call\t$src", []>;
+  def CALLn     : II16n<0b101, (outs), (ins indreg:$rs),  "call\t$rs",  []>;
+  def CALLp     : II16p<0b101, (outs), (ins postreg:$rs), "call\t$rs",  []>;
 }
 
 //===----------------------------------------------------------------------===//
@@ -358,11 +357,11 @@ def MOV16rm : I16rm<0b0100,
 def MOV8rn  : I8rn<0b0100,
                    (outs GR8:$rd), (ins indreg:$rs),
                    "mov.b\t{$rs, $rd}",
-                   [(set GR8:$rd, (load addr:$rs))]>;
+                   [(set GR8:$rd, (load addrIndReg:$rs))]>;
 def MOV16rn : I16rn<0b0100,
                     (outs GR16:$rd), (ins indreg:$rs),
                     "mov\t{$rs, $rd}",
-                    [(set GR16:$rd, (load addr:$rs))]>;
+                    [(set GR16:$rd, (load addrIndReg:$rs))]>;
 }
 
 let isCodeGenOnly = 1 in {
@@ -374,6 +373,10 @@ def MOVZX16rm8 : I8rm<0b0100,
                       (outs GR16:$rd), (ins memsrc:$src),
                       "mov.b\t{$src, $rd}",
                       [(set GR16:$rd, (zextloadi16i8 addr:$src))]>;
+def MOVZX16rn8 : I8rn<0b0100,
+                      (outs GR16:$rd), (ins indreg:$rs),
+                      "mov.b\t{$rs, $rd}",
+                      [(set GR16:$rd, (zextloadi16i8 addrIndReg:$rs))]>;
 }
 
 let mayLoad = 1, hasExtraDefRegAllocReq = 1, Constraints = "$rs = $wb" in {
@@ -437,9 +440,11 @@ def MOV16mm : I16mm<0b0100,
                     [(store (i16 (load addr:$src)), addr:$dst)]>;
 
 def MOV8mn  : I8mn<0b0100, (outs), (ins memdst:$dst, indreg:$rs),
-                   "mov.b\t{$rs, $dst}", []>;
+                   "mov.b\t{$rs, $dst}",
+                    [(store (i8 (load addrIndReg:$rs)), addr:$dst)]>;
 def MOV16mn : I16mn<0b0100, (outs), (ins memdst:$dst, indreg:$rs),
-                    "mov\t{$rs, $dst}", []>;
+                    "mov\t{$rs, $dst}",
+                    [(store (i16 (load addrIndReg:$rs)), addr:$dst)]>;
 
 //===----------------------------------------------------------------------===//
 // Arithmetic Instructions
@@ -467,9 +472,13 @@ multiclass Arith<bits<4> opcode, string asmstring, SDNode node,
                    [(set GR16:$rd, (node GR16:$src2, (load addr:$src))),
                     (implicit SR)]>;
   def 8rn : I8rn<opcode, (outs GR8:$rd), (ins GR8:$src2, indreg:$rs),
-                 !strconcat(asmstring, ".b\t$rs, $rd"), []>;
+                 !strconcat(asmstring, ".b\t$rs, $rd"),
+                 [(set GR8:$rd, (node GR8:$src2, (load addrIndReg:$rs))),
+                  (implicit SR)]>;
   def 16rn : I16rn<opcode, (outs GR16:$rd), (ins GR16:$src2, indreg:$rs),
-                   !strconcat(asmstring, "\t$rs, $rd"), []>;
+                   !strconcat(asmstring, "\t$rs, $rd"),
+                   [(set GR16:$rd, (node GR16:$src2, (load addrIndReg:$rs))),
+                    (implicit SR)]>;
   let mayLoad = 1,
       hasExtraDefRegAllocReq = 1,
       Constraints = "$rs = $wb, $src2 = $rd" in {
@@ -521,18 +530,24 @@ multiclass Arith<bits<4> opcode, string asmstring, SDNode node,
                     (implicit SR)]>;
   def 8mm : I8mm<opcode, (outs), (ins memdst:$dst, memsrc:$src),
                  !strconcat(asmstring, ".b\t$src, $dst"),
-                 [(store (node (load addr:$dst), 
+                 [(store (node (load addr:$dst),
                                (i8 (load addr:$src))), addr:$dst),
                   (implicit SR)]>;
   def 16mm : I16mm<opcode, (outs), (ins memdst:$dst, memsrc:$src),
                    !strconcat(asmstring, "\t$src, $dst"),
-                   [(store (node (load addr:$dst), 
+                   [(store (node (load addr:$dst),
                                  (i16 (load addr:$src))), addr:$dst),
                     (implicit SR)]>;
   def 8mn : I8mn<opcode, (outs), (ins memdst:$dst, indreg:$rs),
-                 !strconcat(asmstring, ".b\t$rs, $dst"), []>;
+                 !strconcat(asmstring, ".b\t$rs, $dst"),
+                 [(store (node (load addr:$dst),
+                               (i8 (load addrIndReg:$rs))), addr:$dst),
+                  (implicit SR)]>;
   def 16mn : I16mn<opcode, (outs), (ins memdst:$dst, indreg:$rs),
-                   !strconcat(asmstring, "\t$rs, $dst"), []>;
+                   !strconcat(asmstring, "\t$rs, $dst"),
+                   [(store (node (load addr:$dst),
+                                 (i16 (load addrIndReg:$rs))), addr:$dst),
+                    (implicit SR)]>;
   def 8mp : I8mp<opcode, (outs), (ins memdst:$dst, postreg:$rs),
                  !strconcat(asmstring, ".b\t$rs, $dst"), []>;
   def 16mp : I16mp<opcode, (outs), (ins memdst:$dst, postreg:$rs),
@@ -685,9 +700,14 @@ def RRA16m : II16m<0b010,
                    "rra\t$src",
                    [(store (MSP430rra (i16 (load addr:$src))), addr:$src),
                     (implicit SR)]>;
-
-def RRA8n  : II8n<0b010, (outs), (ins indreg:$rs), "rra.b\t$rs", []>;
-def RRA16n : II16n<0b010, (outs), (ins indreg:$rs), "rra\t$rs", []>;
+def RRA8n  : II8n<0b010, (outs), (ins indreg:$rs), "rra.b\t$rs",
+                  [(store
+                   (MSP430rra (i8 (load addrIndReg:$rs))), addrIndReg:$rs),
+                   (implicit SR)]>;
+def RRA16n : II16n<0b010, (outs), (ins indreg:$rs), "rra\t$rs",
+                   [(store
+                    (MSP430rra (i16 (load addrIndReg:$rs))), addrIndReg:$rs),
+                    (implicit SR)]>;
 def RRA8p  : II8p<0b010, (outs), (ins postreg:$rs), "rra.b\t$rs", []>;
 def RRA16p : II16p<0b010, (outs), (ins postreg:$rs), "rra\t$rs", []>;
 
@@ -703,8 +723,16 @@ def RRC16m : II16m<0b000,
                    [(store (MSP430rrc (i16 (load addr:$src))), addr:$src),
                     (implicit SR)]>;
 
-def RRC8n  : II8n<0b000, (outs), (ins indreg:$rs), "rrc.b\t$rs", []>;
-def RRC16n : II16n<0b000, (outs), (ins indreg:$rs), "rrc\t$rs", []>;
+def RRC8n  : II8n<0b000, (outs), (ins indreg:$rs),
+                  "rrc.b\t$rs",
+                  [(store
+                   (MSP430rrc (i8 (load addrIndReg:$rs))), addrIndReg:$rs),
+                   (implicit SR)]>;
+def RRC16n : II16n<0b000, (outs), (ins indreg:$rs),
+                   "rrc\t$rs",
+                   [(store
+                    (MSP430rrc (i16 (load addrIndReg:$rs))), addrIndReg:$rs),
+                    (implicit SR)]>;
 def RRC8p  : II8p<0b000, (outs), (ins postreg:$rs), "rrc.b\t$rs", []>;
 def RRC16p : II16p<0b000, (outs), (ins postreg:$rs), "rrc\t$rs", []>;
 
@@ -716,7 +744,10 @@ def SEXT16m : II16m<0b011,
                     [(store (sext_inreg (extloadi16i8 addr:$src), i8),
                              addr:$src),
                      (implicit SR)]>;
-def SEXT16n : II16n<0b011, (outs), (ins indreg:$rs), "sxt\t$rs", []>;
+def SEXT16n : II16n<0b011, (outs), (ins indreg:$rs), "sxt\t$rs",
+                    [(store (sext_inreg (extloadi16i8 addrIndReg:$rs), i8),
+                            addrIndReg:$rs),
+                     (implicit SR)]>;
 def SEXT16p : II16p<0b011, (outs), (ins postreg:$rs), "sxt\t$rs", []>;
 
 } // Defs = [SR]
@@ -725,7 +756,9 @@ def SWPB16m : II16m<0b001,
                    (outs), (ins memsrc:$src),
                    "swpb\t$src",
                    [(store (bswap (i16 (load addr:$src))), addr:$src)]>;
-def SWPB16n : II16n<0b001, (outs), (ins indreg:$rs), "swpb\t$rs", []>;
+def SWPB16n : II16n<0b001, (outs), (ins indreg:$rs), "swpb\t$rs",
+                   [(store
+                    (bswap (i16 (load addrIndReg:$rs))), addrIndReg:$rs)]>;
 def SWPB16p : II16p<0b001, (outs), (ins postreg:$rs), "swpb\t$rs", []>;
 
 // Integer comparisons
@@ -791,9 +824,15 @@ def CMP16rm : I16rm<0b1001,
                      (implicit SR)]>;
 
 def CMP8rn  : I8rn<0b1001,
-                   (outs), (ins GR8:$rd, indreg:$rs), "cmp.b\t$rs, $rd", []>;
+                   (outs), (ins GR8:$rd, indreg:$rs),
+                   "cmp.b\t$rs, $rd",
+                   [(MSP430cmp GR8:$rd, (load addrIndReg:$rs)),
+                    (implicit SR)]>;
 def CMP16rn : I16rn<0b1001,
-                    (outs), (ins GR16:$rd, indreg:$rs), "cmp\t$rs, $rd", []>;
+                    (outs), (ins GR16:$rd, indreg:$rs),
+                    "cmp\t$rs, $rd",
+                    [(MSP430cmp GR16:$rd, (load addrIndReg:$rs)),
+                     (implicit SR)]>;
 
 def CMP8rp  : I8rp<0b1001,
                    (outs), (ins GR8:$rd, postreg:$rs), "cmp.b\t$rs, $rd", []>;
@@ -820,10 +859,16 @@ def CMP16mm : I16mm<0b1001, (outs), (ins memdst:$dst, memsrc:$src),
                     [(MSP430cmp (load addr:$dst), (i16 (load addr:$src))),
                      (implicit SR)]>;
 
-def CMP8mn  : I8mn<0b1001, (outs), (ins memsrc:$dst, indreg:$rs),
-                   "cmp.b\t$rs, $dst", []>;
-def CMP16mn : I16mn<0b1001, (outs), (ins memsrc:$dst, indreg:$rs),
-                    "cmp\t$rs, $dst", []>;
+def CMP8mn  : I8mn<0b1001,
+                   (outs), (ins memsrc:$dst, indreg:$rs),
+                   "cmp.b\t$rs, $dst",
+                   [(MSP430cmp (load addr:$dst), (i8 (load addrIndReg:$rs))),
+                    (implicit SR)]>;
+def CMP16mn : I16mn<0b1001,
+                    (outs), (ins memsrc:$dst, indreg:$rs),
+                    "cmp\t$rs, $dst",
+                    [(MSP430cmp (load addr:$dst), (i16 (load addrIndReg:$rs))),
+                    (implicit SR)]>;
 
 def CMP8mp  : I8mp<0b1001, (outs), (ins memsrc:$dst, postreg:$rs),
                    "cmp.b\t$rs, $dst", []>;
@@ -877,10 +922,16 @@ def BIT16rm : I16rm<0b1011,
                     [(MSP430cmp (and_su GR16:$rd,  (load addr:$src)), 0),
                      (implicit SR)]>;
 
-def BIT8rn  : I8rn<0b1011, (outs), (ins GR8:$rd, indreg:$rs),
-                   "bit.b\t$rs, $rd", []>;
-def BIT16rn : I16rn<0b1011, (outs), (ins GR16:$rd, indreg:$rs),
-                    "bit\t$rs, $rd", []>;
+def BIT8rn  : I8rn<0b1011,
+                   (outs), (ins GR8:$rd, indreg:$rs),
+                   "bit.b\t$rs, $rd",
+                   [(MSP430cmp (and_su GR8:$rd, (load addrIndReg:$rs)), 0),
+                    (implicit SR)]>;
+def BIT16rn : I16rn<0b1011,
+                    (outs), (ins GR16:$rd, indreg:$rs),
+                    "bit\t$rs, $rd",
+                    [(MSP430cmp (and_su GR16:$rd, (load addrIndReg:$rs)), 0),
+                     (implicit SR)]>;
 
 def BIT8rp  : I8rp<0b1011, (outs), (ins GR8:$rd, postreg:$rs),
                    "bit.b\t$rs, $rd", []>;
@@ -935,9 +986,17 @@ def BIT16mm : I16mm<0b1011,
                                  0),
                      (implicit SR)]>;
 def BIT8mn  : I8mn<0b1011, (outs), (ins memsrc:$dst, indreg:$rs),
-                   "bit.b\t$rs, $dst", []>;
+                   "bit.b\t$rs, $dst",
+                    [(MSP430cmp (and_su (i8 (load addr:$dst)),
+                                        (load addrIndReg:$rs)),
+                                 0),
+                     (implicit SR)]>;
 def BIT16mn : I16mn<0b1011, (outs), (ins memsrc:$dst, indreg:$rs),
-                    "bit\t$rs, $dst", []>;
+                    "bit\t$rs, $dst",
+                    [(MSP430cmp (and_su (i16 (load addr:$dst)),
+                                        (load addrIndReg:$rs)),
+                                 0),
+                     (implicit SR)]>;
 
 def BIT8mp  : I8mp<0b1011, (outs), (ins memsrc:$dst, postreg:$rs),
                    "bit.b\t$rs, $dst", []>;
@@ -956,6 +1015,7 @@ def TST16m  : InstAlias<"tst\t$dst",    (CMP16mc   memdst:$dst,  0)>;
 
 // extload
 def : Pat<(extloadi16i8 addr:$src), (MOVZX16rm8 addr:$src)>;
+def : Pat<(extloadi16i8 addrIndReg:$rs), (MOVZX16rn8 addrIndReg:$rs)>;
 
 // anyext
 def : Pat<(i16 (anyext GR8:$src)),

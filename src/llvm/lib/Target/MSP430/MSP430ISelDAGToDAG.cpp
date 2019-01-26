@@ -121,6 +121,7 @@ namespace {
                          unsigned Opc16);
 
     bool SelectAddr(SDValue Addr, SDValue &Base, SDValue &Disp);
+    bool SelectIndirectReg(SDValue N, SDValue &Base);
   };
 }  // end anonymous namespace
 
@@ -240,6 +241,16 @@ bool MSP430DAGToDAGISel::MatchAddress(SDValue N, MSP430ISelAddressMode &AM) {
   }
 
   return MatchAddressBase(N, AM);
+}
+
+/// SelectIndirectReg - returns true if it is able to match indirect register
+/// addressing mode. It returns base register by reference.
+bool MSP430DAGToDAGISel::SelectIndirectReg(SDValue N, SDValue &Base) {
+  if (N.getOpcode() == ISD::CopyFromReg) {
+    Base = N;
+    return true;
+  }
+  return false;
 }
 
 /// SelectAddr - returns true if it is able pattern match an addressing mode.
